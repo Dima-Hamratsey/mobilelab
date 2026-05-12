@@ -5,6 +5,7 @@ on:
 
 env:
   FLUTTER_VERSION: '3.41.2'
+  WORKING_DIRECTORY: 'mobileapp'
 
 jobs:
   analyze:
@@ -22,8 +23,10 @@ jobs:
 
       - name: Flutter Pub Get
         run: flutter pub get
+        working-directory: ${{env.WORKING_DIRECTORY}}
 
       - name: Run Dart Analysis
         uses: invertase/github-action-dart-analyzer@main
         with:
+          working-directory: ${{env.WORKING_DIRECTORY}}
           fatal-infos: true
