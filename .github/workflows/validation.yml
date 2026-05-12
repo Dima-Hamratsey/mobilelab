@@ -5,7 +5,6 @@ on:
 
 env:
   FLUTTER_VERSION: '3.41.2'
-  WORKING_DIRECTORY: 'mobileapp'
 
 jobs:
   analyze:
@@ -22,11 +21,13 @@ jobs:
           channel: 'stable'
 
       - name: Flutter Pub Get
+        # Додаємо шлях до папки з проектом
         run: flutter pub get
-        working-directory: ${{env.WORKING_DIRECTORY}}
+        working-directory: mobileapp
 
       - name: Run Dart Analysis
         uses: invertase/github-action-dart-analyzer@main
         with:
-          working-directory: ${{env.WORKING_DIRECTORY}}
+          # Цей action теж повинен знати, де шукати аналізатор
+          working-directory: mobileapp
           fatal-infos: true
