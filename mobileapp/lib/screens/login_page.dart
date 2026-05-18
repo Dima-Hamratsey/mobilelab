@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import 'package:mobileapp/network/network_status_service.dart';
 import 'package:mobileapp/repositories/local_auth_repository.dart';
 import 'package:mobileapp/services/auth_service.dart';
 import 'package:mobileapp/widgets/coin_badge.dart';
@@ -22,8 +23,16 @@ class _LoginPageState extends State<LoginPage> {
   final AuthService _authService = AuthService(
     repository: LocalAuthRepository(),
   );
+  final NetworkStatusService _networkStatus = NetworkStatusService();
 
   bool _isLoading = false;
+  bool _isCheckingSession = true;
+
+  @override
+  void initState() {
+    super.initState();
+    _tryAutoLogin();
+  }
 
   @override
   void dispose() {
@@ -32,10 +41,47 @@ class _LoginPageState extends State<LoginPage> {
     super.dispose();
   }
 
+  Future<void> _tryAutoLogin() async {
+    final sessionUser = await _authService.getSessionUser();
+    if (!mounted) {
+      return;
+    }
+
+    if (sessionUser == null) {
+      setState(() {
+        _isCheckingSession = false;
+      });
+      return;
+    }
+
+    final isOnline = await _networkStatus.isOnline();
+    if (!mounted) {
+      return;
+    }
+
+    Navigator.pushReplacementNamed(
+      context,
+      '/home',
+      arguments: {'offline': !isOnline},
+    );
+  }
+
   Future<void> _handleLogin() async {
     if (!_formKey.currentState!.validate()) {
       return;
     }
+
+    final isOnline = await _networkStatus.isOnline();
+    if (!isOnline) {
+      if (!mounted) {
+        return;
+      }
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Немає інтернету для входу.')),
+      );
+      return;
+    }
+
     setState(() {
       _isLoading = true;
     });
@@ -65,6 +111,13 @@ class _LoginPageState extends State<LoginPage> {
 
   @override
   Widget build(BuildContext context) {
+    if (_isCheckingSession) {
+      return const GoldScaffold(
+        title: 'Вхід',
+        child: Center(child: CircularProgressIndicator()),
+      );
+    }
+
     return GoldScaffold(
       title: 'Вхід',
       child: SingleChildScrollView(

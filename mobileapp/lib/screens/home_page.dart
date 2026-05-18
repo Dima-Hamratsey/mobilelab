@@ -1,6 +1,9 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 
 import 'package:mobileapp/models/station.dart';
+import 'package:mobileapp/network/network_status_service.dart';
 import 'package:mobileapp/repositories/local_auth_repository.dart';
 import 'package:mobileapp/repositories/local_station_repository.dart';
 import 'package:mobileapp/services/auth_service.dart';
@@ -28,22 +31,71 @@ class _HomePageState extends State<HomePage> {
   final StationService _stationService = StationService(
     repository: LocalStationRepository(),
   );
+  final NetworkStatusService _networkStatus = NetworkStatusService();
+  StreamSubscription<bool>? _networkSub;
+  bool? _lastOnline;
 
   int _activeIndex = 0;
   List<Station> _stations = [];
   bool _isLoading = true;
+  bool _didShowOfflineWarning = false;
 
   @override
   void initState() {
     super.initState();
     _controller = PageController(viewportFraction: 0.92);
     _loadData();
+    _seedNetworkStatus();
+    _networkSub = _networkStatus.onStatusChanged.listen(_handleNetworkChange);
+  }
+
+  Future<void> _seedNetworkStatus() async {
+    final isOnline = await _networkStatus.isOnline();
+    if (!mounted) {
+      return;
+    }
+    _lastOnline = isOnline;
+  }
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    if (_didShowOfflineWarning) {
+      return;
+    }
+
+    final args = ModalRoute.of(context)?.settings.arguments;
+    final offline = args is Map && args['offline'] == true;
+    if (offline) {
+      _showSnack('Автовхід без інтернету. Частина функцій недоступна.');
+    }
+    _didShowOfflineWarning = true;
   }
 
   @override
   void dispose() {
     _controller.dispose();
+    _networkSub?.cancel();
     super.dispose();
+  }
+
+  void _handleNetworkChange(bool isOnline) {
+    if (!mounted) {
+      return;
+    }
+    if (!isOnline && _lastOnline != false) {
+      _showSnack('Втрачено інтернет-зʼєднання.');
+    }
+    if (isOnline && _lastOnline == false) {
+      _showSnack('Інтернет-зʼєднання відновлено.');
+    }
+    _lastOnline = isOnline;
+  }
+
+  void _showSnack(String message) {
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text(message)),
+    );
   }
 
   Future<void> _loadData() async {
@@ -125,6 +177,32 @@ class _HomePageState extends State<HomePage> {
       return;
     }
     Navigator.pushReplacementNamed(context, '/');
+  }
+
+  Future<void> _confirmLogout() async {
+    final shouldLogout = await showDialog<bool>(
+      context: context,
+      builder: (context) {
+        return AlertDialog(
+          title: const Text('Вийти з акаунта?'),
+          content: const Text('Сесію буде завершено.'),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(context, false),
+              child: const Text('Скасувати'),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.pop(context, true),
+              child: const Text('Вийти'),
+            ),
+          ],
+        );
+      },
+    );
+
+    if (shouldLogout == true) {
+      await _handleLogout();
+    }
   }
 
   @override
@@ -253,7 +331,7 @@ class _HomePageState extends State<HomePage> {
           tooltip: 'Профіль',
         ),
         IconButton(
-          onPressed: _handleLogout,
+          onPressed: _confirmLogout,
           icon: const Icon(Icons.logout),
           tooltip: 'Вийти',
         ),
