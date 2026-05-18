@@ -1,7 +1,10 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 
 import 'package:mobileapp/models/station.dart';
 import 'package:mobileapp/models/user.dart';
+import 'package:mobileapp/mqtt/mqtt_temperature_service.dart';
 import 'package:mobileapp/repositories/local_auth_repository.dart';
 import 'package:mobileapp/repositories/local_station_repository.dart';
 import 'package:mobileapp/services/auth_service.dart';
@@ -29,14 +32,62 @@ class _ProfilePageState extends State<ProfilePage> {
     repository: LocalStationRepository(),
   );
 
+  static const double _btcUsdRate = 80000;
+
   User? _user;
   List<Station> _stations = [];
   bool _isLoading = true;
+
+  late final MqttTemperatureService _mqttService;
+  StreamSubscription<double?>? _temperatureSub;
+  StreamSubscription<bool>? _connectionSub;
+  double? _temperature;
+  bool _mqttConnected = false;
 
   @override
   void initState() {
     super.initState();
     _loadData();
+    _initMqtt();
+  }
+
+  @override
+  void dispose() {
+    _temperatureSub?.cancel();
+    _connectionSub?.cancel();
+    _mqttService.dispose();
+    super.dispose();
+  }
+
+  void _initMqtt() {
+    final clientId = 'mobileapp_${DateTime.now().millisecondsSinceEpoch}';
+    const brokerIp = '10.102.31.71';
+
+    _mqttService = MqttTemperatureService(
+      server: brokerIp,
+      clientId: clientId,
+      topic: 'esp8266/temperature',
+      websocketServer: 'ws://$brokerIp',
+    );
+    _mqttService.connect();
+
+    _temperatureSub = _mqttService.temperatureStream.listen((value) {
+      if (!mounted) {
+        return;
+      }
+      setState(() {
+        _temperature = value;
+      });
+    });
+
+    _connectionSub = _mqttService.connectionStream.listen((connected) {
+      if (!mounted) {
+        return;
+      }
+      setState(() {
+        _mqttConnected = connected;
+      });
+    });
   }
 
   Future<void> _loadData() async {
@@ -55,6 +106,7 @@ class _ProfilePageState extends State<ProfilePage> {
   String _formatHashrate(double value) => '${value.toStringAsFixed(0)} TH/s';
   String _formatTemp(double value) => '${value.toStringAsFixed(0)} °C';
   String _formatMined(double value) => '${value.toStringAsFixed(3)} BTC';
+  String _formatUsd(double value) => '${value.toStringAsFixed(0)} \$';
 
   Future<void> _handleLogout() async {
     await _authService.logout();
@@ -62,6 +114,32 @@ class _ProfilePageState extends State<ProfilePage> {
       return;
     }
     Navigator.pushReplacementNamed(context, '/');
+  }
+
+  Future<void> _confirmLogout() async {
+    final shouldLogout = await showDialog<bool>(
+      context: context,
+      builder: (context) {
+        return AlertDialog(
+          title: const Text('Вийти з акаунта?'),
+          content: const Text('Сесію буде завершено.'),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(context, false),
+              child: const Text('Скасувати'),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.pop(context, true),
+              child: const Text('Вийти'),
+            ),
+          ],
+        );
+      },
+    );
+
+    if (shouldLogout == true) {
+      await _handleLogout();
+    }
   }
 
   @override
@@ -81,6 +159,11 @@ class _ProfilePageState extends State<ProfilePage> {
       0,
       (sum, station) => sum + station.metrics.minedBtc,
     );
+    final minedUsd = totalMined * _btcUsdRate;
+    final tempLabel = _temperature == null
+        ? '—'
+        : '${_temperature!.toStringAsFixed(1)} °C';
+    final tempSuffix = _mqttConnected ? '' : ' (немає з\'єднання)';
 
     final content = _isLoading
         ? const Center(child: CircularProgressIndicator())
@@ -125,6 +208,12 @@ class _ProfilePageState extends State<ProfilePage> {
                     ],
                   ),
                 ),
+                const SizedBox(height: 16),
+                GoldPanel(
+                  child: Text(
+                    'Поточна температура: $tempLabel$tempSuffix',
+                  ),
+                ),
                 const SizedBox(height: 24),
                 const SectionTitle(
                   title: 'Сумарні показники',
@@ -143,20 +232,20 @@ class _ProfilePageState extends State<ProfilePage> {
                       icon: Icons.thermostat,
                     ),
                     MetricCard(
-                      label: 'Добуто всього',
+                      label: 'Добуто сьогодні',
                       value: _formatMined(totalMined),
                       icon: Icons.monetization_on,
                     ),
                     MetricCard(
-                      label: 'Кількість станцій',
-                      value: _stations.length.toString(),
-                      icon: Icons.storage_outlined,
+                      label: 'Добуто сьогодні, \$',
+                      value: _formatUsd(minedUsd),
+                      icon: Icons.attach_money,
                     ),
                   ],
                 ),
                 const SizedBox(height: 16),
                 OutlinedButton(
-                  onPressed: _handleLogout,
+                  onPressed: _confirmLogout,
                   child: const Text('Вийти'),
                 ),
               ],

@@ -82,7 +82,6 @@ class _RegisterPageState extends State<RegisterPage> {
                   children: [
                     GoldTextField(
                       label: "Повне ім'я",
-                      hint: 'Олексій Мороз',
                       prefixIcon: Icons.person_outline,
                       controller: _nameController,
                       validator: _authService.validateName,
@@ -90,7 +89,7 @@ class _RegisterPageState extends State<RegisterPage> {
                     const SizedBox(height: 12),
                     GoldTextField(
                       label: 'Пошта',
-                      hint: 'operator@vault.io',
+                      hint: 'operator@gmail.com',
                       prefixIcon: Icons.alternate_email,
                       keyboardType: TextInputType.emailAddress,
                       controller: _emailController,
