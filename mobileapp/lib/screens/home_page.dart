@@ -1,19 +1,14 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
-
 import 'package:mobileapp/models/station.dart';
 import 'package:mobileapp/network/network_status_service.dart';
-import 'package:mobileapp/repositories/local_auth_repository.dart';
-import 'package:mobileapp/repositories/local_station_repository.dart';
+import 'package:mobileapp/repositories/api_auth_repository.dart';
+import 'package:mobileapp/repositories/api_station_repository.dart';
+import 'package:mobileapp/screens/home_content.dart';
 import 'package:mobileapp/services/auth_service.dart';
 import 'package:mobileapp/services/station_service.dart';
-import 'package:mobileapp/widgets/gold_panel.dart';
 import 'package:mobileapp/widgets/gold_scaffold.dart';
-import 'package:mobileapp/widgets/metric_card.dart';
-import 'package:mobileapp/widgets/metric_grid.dart';
-import 'package:mobileapp/widgets/section_title.dart';
-import 'package:mobileapp/widgets/station_card.dart';
 import 'package:mobileapp/widgets/station_editor_dialog.dart';
 
 class HomePage extends StatefulWidget {
@@ -26,12 +21,12 @@ class HomePage extends StatefulWidget {
 class _HomePageState extends State<HomePage> {
   late final PageController _controller;
   final AuthService _authService = AuthService(
-    repository: LocalAuthRepository(),
-  );
-  final StationService _stationService = StationService(
-    repository: LocalStationRepository(),
+    repository: ApiAuthRepository(),
   );
   final NetworkStatusService _networkStatus = NetworkStatusService();
+  late final StationService _stationService = StationService(
+    repository: ApiStationRepository(networkStatus: _networkStatus),
+  );
   StreamSubscription<bool>? _networkSub;
   bool? _lastOnline;
 
@@ -79,15 +74,21 @@ class _HomePageState extends State<HomePage> {
     super.dispose();
   }
 
-  void _handleNetworkChange(bool isOnline) {
+  Future<void> _handleNetworkChange(bool isOnline) async {
     if (!mounted) {
       return;
     }
+    final wasOffline = _lastOnline == false;
     if (!isOnline && _lastOnline != false) {
       _showSnack('Втрачено інтернет-зʼєднання.');
     }
-    if (isOnline && _lastOnline == false) {
+    if (isOnline && wasOffline) {
       _showSnack('Інтернет-зʼєднання відновлено.');
+      await _stationService.syncStations();
+      if (!mounted) {
+        return;
+      }
+      await _loadData();
     }
     _lastOnline = isOnline;
   }
@@ -166,11 +167,6 @@ class _HomePageState extends State<HomePage> {
     await _loadData();
   }
 
-  String _formatTemp(double value) => '${value.toStringAsFixed(0)} °C';
-  String _formatLoad(double value) => '${value.toStringAsFixed(0)}%';
-  String _formatHashrate(double value) => '${value.toStringAsFixed(0)} TH/s';
-  String _formatMined(double value) => '${value.toStringAsFixed(3)} BTC';
-
   Future<void> _handleLogout() async {
     await _authService.logout();
     if (!mounted) {
@@ -207,118 +203,8 @@ class _HomePageState extends State<HomePage> {
 
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
     final activeStation =
         _stations.isNotEmpty ? _stations[_activeIndex] : null;
-
-    final content = _isLoading
-        ? const Center(child: CircularProgressIndicator())
-        : SingleChildScrollView(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                const SectionTitle(
-                  title: 'Майнингові станції',
-                  subtitle: 'Гортайте карти, щоб перемикатися.',
-                ),
-                const SizedBox(height: 12),
-                if (_stations.isEmpty)
-                  GoldPanel(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(
-                          'Станцій ще немає',
-                          style: theme.textTheme.titleMedium,
-                        ),
-                        const SizedBox(height: 6),
-                        const Text('Додайте першу через кнопку +.'),
-                      ],
-                    ),
-                  )
-                else
-                  Column(
-                    children: [
-                      SizedBox(
-                        height: 250,
-                        child: PageView.builder(
-                          controller: _controller,
-                          itemCount: _stations.length,
-                          onPageChanged: (index) {
-                            setState(() {
-                              _activeIndex = index;
-                            });
-                          },
-                          itemBuilder: (context, index) {
-                            final station = _stations[index];
-                            return Padding(
-                              padding: const EdgeInsets.only(right: 12),
-                              child: StationCard(station: station),
-                            );
-                          },
-                        ),
-                      ),
-                      const SizedBox(height: 16),
-                      Row(
-                        children: [
-                          Expanded(
-                            child: OutlinedButton.icon(
-                              onPressed: () =>
-                                  _openStationEditor(station: activeStation),
-                              icon: const Icon(Icons.edit_outlined),
-                              label: const Text('Редагувати'),
-                            ),
-                          ),
-                          const SizedBox(width: 12),
-                          Expanded(
-                            child: OutlinedButton.icon(
-                              onPressed: () => _confirmDelete(activeStation!),
-                              icon: const Icon(Icons.delete_outline),
-                              label: const Text('Видалити'),
-                            ),
-                          ),
-                        ],
-                      ),
-                    ],
-                  ),
-                if (activeStation != null) ...[
-                  const SizedBox(height: 24),
-                  const SectionTitle(
-                    title: 'Показники',
-                    subtitle: 'Характеристики активної станції.',
-                  ),
-                  const SizedBox(height: 12),
-                  MetricGrid(
-                    children: [
-                      MetricCard(
-                        label: 'Температура',
-                        value: _formatTemp(
-                          activeStation.metrics.temperatureC,
-                        ),
-                        icon: Icons.thermostat,
-                      ),
-                      MetricCard(
-                        label: 'Навантаження',
-                        value: _formatLoad(activeStation.metrics.loadPercent),
-                        icon: Icons.speed,
-                      ),
-                      MetricCard(
-                        label: 'Хешрейт',
-                        value:
-                            _formatHashrate(activeStation.metrics.hashrateThs),
-                        icon: Icons.bolt,
-                      ),
-                      MetricCard(
-                        label: 'Добуто',
-                        value: _formatMined(activeStation.metrics.minedBtc),
-                        icon: Icons.monetization_on,
-                      ),
-                    ],
-                  ),
-                ],
-              ],
-            ),
-          );
 
     return GoldScaffold(
       title: 'Центр керування',
@@ -341,7 +227,23 @@ class _HomePageState extends State<HomePage> {
         tooltip: 'Додати станцію',
         child: const Icon(Icons.add),
       ),
-      child: content,
+      child: HomeContent(
+        isLoading: _isLoading,
+        stations: _stations,
+        activeIndex: _activeIndex,
+        controller: _controller,
+        onPageChanged: (index) {
+          setState(() {
+            _activeIndex = index;
+          });
+        },
+        onEdit: activeStation == null
+            ? null
+            : () => _openStationEditor(station: activeStation),
+        onDelete: activeStation == null
+            ? null
+            : () => _confirmDelete(activeStation),
+      ),
     );
   }
 }

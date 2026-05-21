@@ -7,4 +7,5 @@ abstract class IStationRepository {
   Future<void> addStation(Station station);
   Future<void> updateStation(Station station);
   Future<void> deleteStation(String id);
+  Future<void> syncStations();
 }

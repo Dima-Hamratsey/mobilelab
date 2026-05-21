@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
-
-import 'package:mobileapp/repositories/local_auth_repository.dart';
+import 'package:mobileapp/api/api_client.dart';
+import 'package:mobileapp/repositories/api_auth_repository.dart';
 import 'package:mobileapp/services/auth_service.dart';
 import 'package:mobileapp/widgets/coin_badge.dart';
 import 'package:mobileapp/widgets/gold_panel.dart';
@@ -21,7 +21,7 @@ class _RegisterPageState extends State<RegisterPage> {
   final _emailController = TextEditingController();
   final _passwordController = TextEditingController();
   final AuthService _authService = AuthService(
-    repository: LocalAuthRepository(),
+    repository: ApiAuthRepository(),
   );
 
   bool _isLoading = false;
@@ -42,11 +42,25 @@ class _RegisterPageState extends State<RegisterPage> {
       _isLoading = true;
     });
 
-    await _authService.register(
-      name: _nameController.text,
-      email: _emailController.text,
-      password: _passwordController.text,
-    );
+    try {
+      await _authService.register(
+        name: _nameController.text,
+        email: _emailController.text,
+        password: _passwordController.text,
+      );
+    } catch (error) {
+      if (!mounted) {
+        return;
+      }
+      final message = error is ApiException ? error.message : '$error';
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Помилка: $message')),
+      );
+      setState(() {
+        _isLoading = false;
+      });
+      return;
+    }
 
     if (!mounted) {
       return;

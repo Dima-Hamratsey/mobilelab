@@ -25,6 +25,10 @@ class StationService {
     return _repository.deleteStation(id);
   }
 
+  Future<void> syncStations() {
+    return _repository.syncStations();
+  }
+
   String? validateRequired(String? value, String label) {
     final text = value?.trim() ?? '';
     if (text.isEmpty) {
