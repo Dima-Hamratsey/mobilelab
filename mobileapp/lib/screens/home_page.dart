@@ -1,13 +1,9 @@
-import 'dart:async';
-
 import 'package:flutter/material.dart';
+import 'package:flutter_bloc/flutter_bloc.dart';
+import 'package:mobileapp/cubits/session_cubit.dart';
+import 'package:mobileapp/cubits/stations_cubit.dart';
 import 'package:mobileapp/models/station.dart';
-import 'package:mobileapp/network/network_status_service.dart';
-import 'package:mobileapp/repositories/api_auth_repository.dart';
-import 'package:mobileapp/repositories/api_station_repository.dart';
 import 'package:mobileapp/screens/home_content.dart';
-import 'package:mobileapp/services/auth_service.dart';
-import 'package:mobileapp/services/station_service.dart';
 import 'package:mobileapp/widgets/gold_scaffold.dart';
 import 'package:mobileapp/widgets/station_editor_dialog.dart';
 
@@ -20,36 +16,12 @@ class HomePage extends StatefulWidget {
 
 class _HomePageState extends State<HomePage> {
   late final PageController _controller;
-  final AuthService _authService = AuthService(
-    repository: ApiAuthRepository(),
-  );
-  final NetworkStatusService _networkStatus = NetworkStatusService();
-  late final StationService _stationService = StationService(
-    repository: ApiStationRepository(networkStatus: _networkStatus),
-  );
-  StreamSubscription<bool>? _networkSub;
-  bool? _lastOnline;
-
-  int _activeIndex = 0;
-  List<Station> _stations = [];
-  bool _isLoading = true;
   bool _didShowOfflineWarning = false;
 
   @override
   void initState() {
     super.initState();
     _controller = PageController(viewportFraction: 0.92);
-    _loadData();
-    _seedNetworkStatus();
-    _networkSub = _networkStatus.onStatusChanged.listen(_handleNetworkChange);
-  }
-
-  Future<void> _seedNetworkStatus() async {
-    final isOnline = await _networkStatus.isOnline();
-    if (!mounted) {
-      return;
-    }
-    _lastOnline = isOnline;
   }
 
   @override
@@ -62,7 +34,7 @@ class _HomePageState extends State<HomePage> {
     final args = ModalRoute.of(context)?.settings.arguments;
     final offline = args is Map && args['offline'] == true;
     if (offline) {
-      _showSnack('Автовхід без інтернету. Частина функцій недоступна.');
+      context.read<StationsCubit>().showOfflineWarning();
     }
     _didShowOfflineWarning = true;
   }
@@ -70,27 +42,7 @@ class _HomePageState extends State<HomePage> {
   @override
   void dispose() {
     _controller.dispose();
-    _networkSub?.cancel();
     super.dispose();
-  }
-
-  Future<void> _handleNetworkChange(bool isOnline) async {
-    if (!mounted) {
-      return;
-    }
-    final wasOffline = _lastOnline == false;
-    if (!isOnline && _lastOnline != false) {
-      _showSnack('Втрачено інтернет-зʼєднання.');
-    }
-    if (isOnline && wasOffline) {
-      _showSnack('Інтернет-зʼєднання відновлено.');
-      await _stationService.syncStations();
-      if (!mounted) {
-        return;
-      }
-      await _loadData();
-    }
-    _lastOnline = isOnline;
   }
 
   void _showSnack(String message) {
@@ -99,28 +51,12 @@ class _HomePageState extends State<HomePage> {
     );
   }
 
-  Future<void> _loadData() async {
-    final stations = await _stationService.getStations();
-    if (!mounted) {
-      return;
-    }
-    final nextIndex = stations.isEmpty
-        ? 0
-        : _activeIndex.clamp(0, stations.length - 1);
-    setState(() {
-      _stations = stations;
-      _activeIndex = nextIndex;
-      _isLoading = false;
-    });
-  }
-
   Future<void> _openStationEditor({Station? station}) async {
     final result = await showDialog<Station>(
       context: context,
       builder: (context) {
         return StationEditorDialog(
           station: station,
-          stationService: _stationService,
         );
       },
     );
@@ -130,12 +66,10 @@ class _HomePageState extends State<HomePage> {
     }
 
     if (station == null) {
-      await _stationService.addStation(result);
+      await context.read<StationsCubit>().addStation(result);
     } else {
-      await _stationService.updateStation(result);
+      await context.read<StationsCubit>().updateStation(result);
     }
-
-    await _loadData();
   }
 
   Future<void> _confirmDelete(Station station) async {
@@ -159,20 +93,15 @@ class _HomePageState extends State<HomePage> {
       },
     );
 
+    if (!mounted) {
+      return;
+    }
+
     if (shouldDelete != true) {
       return;
     }
 
-    await _stationService.deleteStation(station.id);
-    await _loadData();
-  }
-
-  Future<void> _handleLogout() async {
-    await _authService.logout();
-    if (!mounted) {
-      return;
-    }
-    Navigator.pushReplacementNamed(context, '/');
+    await context.read<StationsCubit>().deleteStation(station.id);
   }
 
   Future<void> _confirmLogout() async {
@@ -196,53 +125,118 @@ class _HomePageState extends State<HomePage> {
       },
     );
 
+    if (!mounted) {
+      return;
+    }
+
     if (shouldLogout == true) {
-      await _handleLogout();
+      await context.read<SessionCubit>().logout();
     }
   }
 
   @override
   Widget build(BuildContext context) {
-    final activeStation =
-        _stations.isNotEmpty ? _stations[_activeIndex] : null;
-
-    return GoldScaffold(
-      title: 'Центр керування',
-      actions: [
-        IconButton(
-          onPressed: () {
-            Navigator.pushNamed(context, '/profile');
+    return MultiBlocListener(
+      listeners: [
+        BlocListener<StationsCubit, StationsState>(
+          listenWhen: (previous, current) =>
+              previous.notice != current.notice && current.notice != null,
+          listener: (context, state) {
+            final message = switch (state.notice) {
+              StationsNotice.offlineLost => 'Втрачено інтернет-зʼєднання.',
+              StationsNotice.onlineRestored => 'Інтернет-зʼєднання відновлено.',
+              StationsNotice.offlineAutoLogin =>
+                'Автовхід без інтернету. Частина функцій недоступна.',
+              _ => null,
+            };
+            if (message != null) {
+              _showSnack(message);
+            }
+            context.read<StationsCubit>().clearNotice();
           },
-          icon: const Icon(Icons.person_outline),
-          tooltip: 'Профіль',
         ),
-        IconButton(
-          onPressed: _confirmLogout,
-          icon: const Icon(Icons.logout),
-          tooltip: 'Вийти',
+        BlocListener<StationsCubit, StationsState>(
+          listenWhen: (previous, current) =>
+              previous.status != current.status &&
+              current.status == StationsStatus.failure,
+          listener: (context, state) {
+            final message =
+                state.errorMessage ?? 'Не вдалося завантажити дані.';
+            _showSnack('Помилка: $message');
+          },
+        ),
+        BlocListener<StationsCubit, StationsState>(
+          listenWhen: (previous, current) =>
+              previous.activeIndex != current.activeIndex,
+          listener: (context, state) {
+            if (_controller.hasClients) {
+              _controller.jumpToPage(state.activeIndex);
+            }
+          },
+        ),
+        BlocListener<SessionCubit, SessionState>(
+          listenWhen: (previous, current) =>
+              previous.status != current.status,
+          listener: (context, state) {
+            if (state.status == SessionStatus.loggedOut) {
+              context.read<SessionCubit>().reset();
+              Navigator.pushReplacementNamed(context, '/');
+            }
+            if (state.status == SessionStatus.failure) {
+              final message =
+                  state.errorMessage ?? 'Не вдалося вийти з акаунта.';
+              _showSnack(message);
+              context.read<SessionCubit>().reset();
+            }
+          },
         ),
       ],
-      floatingActionButton: FloatingActionButton(
-        onPressed: _openStationEditor,
-        tooltip: 'Додати станцію',
-        child: const Icon(Icons.add),
-      ),
-      child: HomeContent(
-        isLoading: _isLoading,
-        stations: _stations,
-        activeIndex: _activeIndex,
-        controller: _controller,
-        onPageChanged: (index) {
-          setState(() {
-            _activeIndex = index;
-          });
+      child: BlocBuilder<StationsCubit, StationsState>(
+        builder: (context, state) {
+          final activeStation = state.stations.isNotEmpty
+              ? state.stations[state.activeIndex]
+              : null;
+          final isLoading = state.status == StationsStatus.loading ||
+              state.status == StationsStatus.initial;
+
+          return GoldScaffold(
+            title: 'Центр керування',
+            actions: [
+              IconButton(
+                onPressed: () {
+                  Navigator.pushNamed(context, '/profile');
+                },
+                icon: const Icon(Icons.person_outline),
+                tooltip: 'Профіль',
+              ),
+              IconButton(
+                onPressed: _confirmLogout,
+                icon: const Icon(Icons.logout),
+                tooltip: 'Вийти',
+              ),
+            ],
+            floatingActionButton: FloatingActionButton(
+              onPressed: _openStationEditor,
+              tooltip: 'Додати станцію',
+              child: const Icon(Icons.add),
+            ),
+            child: HomeContent(
+              isLoading: isLoading,
+              stations: state.stations,
+              activeIndex: state.activeIndex,
+              controller: _controller,
+              onPageChanged: (index) {
+                context.read<StationsCubit>().setActiveIndex(index);
+              },
+              onEdit: activeStation == null
+                  ? null
+                  : () => _openStationEditor(station: activeStation),
+              onDelete: activeStation == null
+                  ? null
+                  : () => _confirmDelete(activeStation),
+            ),
+          );
         },
-        onEdit: activeStation == null
-            ? null
-            : () => _openStationEditor(station: activeStation),
-        onDelete: activeStation == null
-            ? null
-            : () => _confirmDelete(activeStation),
       ),
     );
   }

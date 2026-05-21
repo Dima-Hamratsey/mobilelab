@@ -1,13 +1,8 @@
-import 'dart:async';
-
 import 'package:flutter/material.dart';
+import 'package:flutter_bloc/flutter_bloc.dart';
 
-import 'package:mobileapp/models/profile_data.dart';
-import 'package:mobileapp/mqtt/mqtt_temperature_service.dart';
-import 'package:mobileapp/repositories/api_auth_repository.dart';
-import 'package:mobileapp/repositories/api_station_repository.dart';
-import 'package:mobileapp/services/auth_service.dart';
-import 'package:mobileapp/services/station_service.dart';
+import 'package:mobileapp/cubits/profile_cubit.dart';
+import 'package:mobileapp/cubits/session_cubit.dart';
 import 'package:mobileapp/widgets/coin_badge.dart';
 import 'package:mobileapp/widgets/gold_panel.dart';
 import 'package:mobileapp/widgets/gold_scaffold.dart';
@@ -16,81 +11,9 @@ import 'package:mobileapp/widgets/metric_grid.dart';
 import 'package:mobileapp/widgets/profile_tile.dart';
 import 'package:mobileapp/widgets/section_title.dart';
 
-class ProfilePage extends StatefulWidget {
+class ProfilePage extends StatelessWidget {
   const ProfilePage({super.key});
-
-  @override
-  State<ProfilePage> createState() => _ProfilePageState();
-}
-
-class _ProfilePageState extends State<ProfilePage> {
   static const double _btcUsdRate = 80000;
-
-  final AuthService _authService = AuthService(
-    repository: ApiAuthRepository(),
-  );
-  final StationService _stationService = StationService(
-    repository: ApiStationRepository(),
-  );
-
-  late final Future<ProfileData> _profileFuture;
-  late final MqttTemperatureService _mqttService;
-  StreamSubscription<double?>? _temperatureSub;
-  StreamSubscription<bool>? _connectionSub;
-  double? _temperature;
-  bool _mqttConnected = false;
-
-  @override
-  void initState() {
-    super.initState();
-    _profileFuture = _loadProfile();
-    _initMqtt();
-  }
-
-  @override
-  void dispose() {
-    _temperatureSub?.cancel();
-    _connectionSub?.cancel();
-    _mqttService.dispose();
-    super.dispose();
-  }
-
-  void _initMqtt() {
-    final clientId = 'mobileapp_${DateTime.now().millisecondsSinceEpoch}';
-    const brokerIp = '10.102.31.71';
-
-    _mqttService = MqttTemperatureService(
-      server: brokerIp,
-      clientId: clientId,
-      topic: 'esp8266/temperature',
-      websocketServer: 'ws://$brokerIp',
-    );
-    _mqttService.connect();
-
-    _temperatureSub = _mqttService.temperatureStream.listen((value) {
-      if (!mounted) {
-        return;
-      }
-      setState(() {
-        _temperature = value;
-      });
-    });
-
-    _connectionSub = _mqttService.connectionStream.listen((connected) {
-      if (!mounted) {
-        return;
-      }
-      setState(() {
-        _mqttConnected = connected;
-      });
-    });
-  }
-
-  Future<ProfileData> _loadProfile() async {
-    final user = await _authService.getSessionUser();
-    final stations = await _stationService.getStations();
-    return ProfileData(user: user, stations: stations);
-  }
 
   String _formatHashrate(double value) {
     return '${value.toStringAsFixed(0)} TH/s';
@@ -108,7 +31,7 @@ class _ProfilePageState extends State<ProfilePage> {
     return '${value.toStringAsFixed(0)} \$';
   }
 
-  Future<void> _confirmLogout() async {
+  Future<void> _confirmLogout(BuildContext context) async {
     final shouldLogout = await showDialog<bool>(
       context: context,
       builder: (context) {
@@ -129,50 +52,73 @@ class _ProfilePageState extends State<ProfilePage> {
       },
     );
 
+    if (!context.mounted) {
+      return;
+    }
+
     if (shouldLogout == true) {
-      await _authService.logout();
-      if (!mounted) {
-        return;
-      }
-      Navigator.pushReplacementNamed(context, '/');
+      await context.read<SessionCubit>().logout();
     }
   }
 
   @override
   Widget build(BuildContext context) {
-    return GoldScaffold(
-      title: 'Профіль',
-      actions: [
-        IconButton(
-          onPressed: () {
-            Navigator.pushReplacementNamed(context, '/home');
-          },
-          icon: const Icon(Icons.home_outlined),
-          tooltip: 'Головна',
-        ),
-      ],
-      child: FutureBuilder<ProfileData>(
-        future: _profileFuture,
-        builder: (context, snapshot) {
-          if (snapshot.connectionState == ConnectionState.waiting) {
-            return const Center(child: CircularProgressIndicator());
-          }
-          if (snapshot.hasError) {
-            return Center(
-              child: Text('Помилка: ${snapshot.error}'),
-            );
-          }
-
-          final data = snapshot.data ??
-              const ProfileData(user: null, stations: []);
-          return _buildContent(context, data);
+    return BlocListener<SessionCubit, SessionState>(
+      listenWhen: (previous, current) => previous.status != current.status,
+      listener: (context, state) {
+        if (state.status == SessionStatus.loggedOut) {
+          context.read<SessionCubit>().reset();
+          Navigator.pushReplacementNamed(context, '/');
+        }
+        if (state.status == SessionStatus.failure) {
+          final message =
+              state.errorMessage ?? 'Не вдалося вийти з акаунта.';
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text(message)),
+          );
+          context.read<SessionCubit>().reset();
+        }
+      },
+      child: BlocBuilder<ProfileCubit, ProfileState>(
+        builder: (context, state) {
+          return GoldScaffold(
+            title: 'Профіль',
+            actions: [
+              IconButton(
+                onPressed: () {
+                  Navigator.pushReplacementNamed(context, '/home');
+                },
+                icon: const Icon(Icons.home_outlined),
+                tooltip: 'Головна',
+              ),
+              IconButton(
+                onPressed: () => _confirmLogout(context),
+                icon: const Icon(Icons.logout),
+                tooltip: 'Вийти',
+              ),
+            ],
+            child: _buildBody(context, state),
+          );
         },
       ),
     );
   }
 
-  Widget _buildContent(BuildContext context, ProfileData data) {
+  Widget _buildBody(BuildContext context, ProfileState state) {
+    if (state.status == ProfileStatus.loading) {
+      return const Center(child: CircularProgressIndicator());
+    }
+    if (state.status == ProfileStatus.failure) {
+      final message = state.errorMessage ?? 'Помилка';
+      return Center(child: Text('Помилка: $message'));
+    }
+
+    return _buildContent(context, state);
+  }
+
+  Widget _buildContent(BuildContext context, ProfileState state) {
     final theme = Theme.of(context);
+    final data = state.data;
     final totalHashrate = data.stations.fold<double>(
       0,
       (sum, station) => sum + station.metrics.hashrateThs,
@@ -189,12 +135,10 @@ class _ProfilePageState extends State<ProfilePage> {
       (sum, station) => sum + station.metrics.minedBtc,
     );
     final minedUsd = totalMined * _btcUsdRate;
-    final tempLabel = _temperature == null
-        ? '—'
-        : '${_temperature!.toStringAsFixed(1)} °C';
-    final tempSuffix = _mqttConnected
-        ? ''
-        : ' (немає з\'єднання)';
+    final tempLabel = state.temperature == null
+      ? '—'
+      : '${state.temperature!.toStringAsFixed(1)} °C';
+    final tempSuffix = state.mqttConnected ? '' : ' (немає з\'єднання)';
 
     return SingleChildScrollView(
       child: Column(
@@ -274,7 +218,7 @@ class _ProfilePageState extends State<ProfilePage> {
           ),
           const SizedBox(height: 16),
           OutlinedButton(
-            onPressed: _confirmLogout,
+            onPressed: () => _confirmLogout(context),
             child: const Text('Вийти'),
           ),
         ],
