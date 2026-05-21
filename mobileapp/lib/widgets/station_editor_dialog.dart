@@ -1,17 +1,15 @@
 import 'package:flutter/material.dart';
 
 import 'package:mobileapp/models/station.dart';
-import 'package:mobileapp/services/station_service.dart';
+import 'package:mobileapp/models/station_metrics.dart';
 import 'package:mobileapp/widgets/gold_text_field.dart';
 
 class StationEditorDialog extends StatefulWidget {
   const StationEditorDialog({
-    required this.stationService,
     this.station,
     super.key,
   });
 
-  final StationService stationService;
   final Station? station;
 
   @override
@@ -62,20 +60,53 @@ class _StationEditorDialogState extends State<StationEditorDialog> {
     return double.parse(controller.text.replaceAll(',', '.'));
   }
 
+  String? _validateRequired(String? value, String label) {
+    final text = value?.trim() ?? '';
+    if (text.isEmpty) {
+      return 'Заповніть "$label"';
+    }
+    return null;
+  }
+
+  String? _validateNumber(
+    String? value,
+    String label, {
+    double? min,
+    double? max,
+  }) {
+    final text = value?.trim() ?? '';
+    if (text.isEmpty) {
+      return 'Заповніть "$label"';
+    }
+    final parsed = double.tryParse(text.replaceAll(',', '.'));
+    if (parsed == null) {
+      return 'Вкажіть число';
+    }
+    if (min != null && parsed < min) {
+      return 'Мінімум $min';
+    }
+    if (max != null && parsed > max) {
+      return 'Максимум $max';
+    }
+    return null;
+  }
+
   void _submit() {
     if (!_formKey.currentState!.validate()) {
       return;
     }
 
-    final station = widget.stationService.buildStation(
+    final station = Station(
       id: widget.station?.id ??
           DateTime.now().millisecondsSinceEpoch.toString(),
-      name: _nameController.text,
-      location: _locationController.text,
-      temperatureC: _parseDouble(_tempController),
-      loadPercent: _parseDouble(_loadController),
-      hashrateThs: _parseDouble(_hashrateController),
-      minedBtc: _parseDouble(_minedController),
+      name: _nameController.text.trim(),
+      location: _locationController.text.trim(),
+      metrics: StationMetrics(
+        temperatureC: _parseDouble(_tempController),
+        loadPercent: _parseDouble(_loadController),
+        hashrateThs: _parseDouble(_hashrateController),
+        minedBtc: _parseDouble(_minedController),
+      ),
     );
 
     Navigator.pop(context, station);
@@ -96,17 +127,13 @@ class _StationEditorDialogState extends State<StationEditorDialog> {
               GoldTextField(
                 label: 'Назва',
                 controller: _nameController,
-                validator: (value) =>
-                    widget.stationService.validateRequired(value, 'Назва'),
+                validator: (value) => _validateRequired(value, 'Назва'),
               ),
               const SizedBox(height: 12),
               GoldTextField(
                 label: 'Локація',
                 controller: _locationController,
-                validator: (value) => widget.stationService.validateRequired(
-                  value,
-                  'Локація',
-                ),
+                validator: (value) => _validateRequired(value, 'Локація'),
               ),
               const SizedBox(height: 12),
               GoldTextField(
@@ -115,7 +142,7 @@ class _StationEditorDialogState extends State<StationEditorDialog> {
                 keyboardType: const TextInputType.numberWithOptions(
                   decimal: true,
                 ),
-                validator: (value) => widget.stationService.validateNumber(
+                validator: (value) => _validateNumber(
                   value,
                   'Температура',
                   min: 0,
@@ -128,7 +155,7 @@ class _StationEditorDialogState extends State<StationEditorDialog> {
                 keyboardType: const TextInputType.numberWithOptions(
                   decimal: true,
                 ),
-                validator: (value) => widget.stationService.validateNumber(
+                validator: (value) => _validateNumber(
                   value,
                   'Навантаження',
                   min: 0,
@@ -142,7 +169,7 @@ class _StationEditorDialogState extends State<StationEditorDialog> {
                 keyboardType: const TextInputType.numberWithOptions(
                   decimal: true,
                 ),
-                validator: (value) => widget.stationService.validateNumber(
+                validator: (value) => _validateNumber(
                   value,
                   'Хешрейт',
                   min: 0,
@@ -155,7 +182,7 @@ class _StationEditorDialogState extends State<StationEditorDialog> {
                 keyboardType: const TextInputType.numberWithOptions(
                   decimal: true,
                 ),
-                validator: (value) => widget.stationService.validateNumber(
+                validator: (value) => _validateNumber(
                   value,
                   'Добуто',
                   min: 0,

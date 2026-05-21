@@ -1,7 +1,8 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_bloc/flutter_bloc.dart';
 
+import 'package:mobileapp/cubits/login_cubit.dart';
 import 'package:mobileapp/network/network_status_service.dart';
-import 'package:mobileapp/repositories/api_auth_repository.dart';
 import 'package:mobileapp/services/auth_service.dart';
 import 'package:mobileapp/widgets/coin_badge.dart';
 import 'package:mobileapp/widgets/gold_panel.dart';
@@ -20,12 +21,6 @@ class _LoginPageState extends State<LoginPage> {
   final _formKey = GlobalKey<FormState>();
   final _emailController = TextEditingController();
   final _passwordController = TextEditingController();
-  final AuthService _authService = AuthService(
-    repository: ApiAuthRepository(),
-  );
-  final NetworkStatusService _networkStatus = NetworkStatusService();
-
-  bool _isLoading = false;
   bool _isCheckingSession = true;
 
   @override
@@ -42,7 +37,9 @@ class _LoginPageState extends State<LoginPage> {
   }
 
   Future<void> _tryAutoLogin() async {
-    final sessionUser = await _authService.getSessionUser();
+    final authService = context.read<AuthService>();
+    final networkStatus = context.read<NetworkStatusService>();
+    final sessionUser = await authService.getSessionUser();
     if (!mounted) {
       return;
     }
@@ -54,7 +51,7 @@ class _LoginPageState extends State<LoginPage> {
       return;
     }
 
-    final isOnline = await _networkStatus.isOnline();
+    final isOnline = await networkStatus.isOnline();
     if (!mounted) {
       return;
     }
@@ -70,116 +67,136 @@ class _LoginPageState extends State<LoginPage> {
     if (!_formKey.currentState!.validate()) {
       return;
     }
-
-    final isOnline = await _networkStatus.isOnline();
-    if (!isOnline) {
-      if (!mounted) {
-        return;
-      }
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Немає інтернету для входу.')),
-      );
-      return;
-    }
-
-    setState(() {
-      _isLoading = true;
-    });
-
-    final user = await _authService.login(
+    await context.read<LoginCubit>().login(
       email: _emailController.text,
       password: _passwordController.text,
     );
+  }
 
-    if (!mounted) {
-      return;
+  String? _validateEmail(String? value) {
+    final email = value?.trim() ?? '';
+    if (email.isEmpty) {
+      return 'Вкажіть пошту';
     }
-
-    setState(() {
-      _isLoading = false;
-    });
-
-    if (user == null) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Невірна пошта або пароль.')),
-      );
-      return;
+    final isValid = RegExp(r'^[^@\s]+@[^@\s]+\.[^@\s]+$').hasMatch(email);
+    if (!isValid) {
+      return 'Некоректна пошта';
     }
+    return null;
+  }
 
-    Navigator.pushReplacementNamed(context, '/home');
+  String? _validatePassword(String? value) {
+    final password = value ?? '';
+    if (password.isEmpty) {
+      return 'Вкажіть пароль';
+    }
+    if (password.length < 8) {
+      return 'Мінімум 8 символів';
+    }
+    return null;
   }
 
   @override
   Widget build(BuildContext context) {
-    if (_isCheckingSession) {
-      return const GoldScaffold(
-        title: 'Вхід',
-        child: Center(child: CircularProgressIndicator()),
-      );
-    }
+    return BlocListener<LoginCubit, LoginState>(
+      listenWhen: (previous, current) => previous.status != current.status,
+      listener: (context, state) {
+        if (state.status == LoginStatus.failure) {
+          final message = switch (state.failureReason) {
+            LoginFailureReason.offline => 'Немає інтернету для входу.',
+            LoginFailureReason.invalidCredentials =>
+              'Невірна пошта або пароль.',
+            _ => 'Помилка входу.',
+          };
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text(message)),
+          );
+          context.read<LoginCubit>().resetStatus();
+        }
+        if (state.status == LoginStatus.success) {
+          context.read<LoginCubit>().resetStatus();
+          Navigator.pushReplacementNamed(context, '/home');
+        }
+      },
+      child: BlocBuilder<LoginCubit, LoginState>(
+        builder: (context, state) {
+          final isLoading = state.status == LoginStatus.loading;
+          if (_isCheckingSession) {
+            return const GoldScaffold(
+              title: 'Вхід',
+              child: Center(child: CircularProgressIndicator()),
+            );
+          }
 
-    return GoldScaffold(
-      title: 'Вхід',
-      child: SingleChildScrollView(
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            const SizedBox(height: 12),
-            const Center(child: CoinBadge()),
-            const SizedBox(height: 16),
-            const SectionTitle(
-              title: 'Логін в додаток',
-            ),
-            const SizedBox(height: 16),
-            GoldPanel(
-              child: Form(
-                key: _formKey,
-                child: Column(
-                  children: [
-                    GoldTextField(
-                      label: 'Пошта',
-                      hint: 'operator@vault.io',
-                      prefixIcon: Icons.alternate_email,
-                      keyboardType: TextInputType.emailAddress,
-                      controller: _emailController,
-                      validator: _authService.validateEmail,
+          return GoldScaffold(
+            title: 'Вхід',
+            child: SingleChildScrollView(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const SizedBox(height: 12),
+                  const Center(child: CoinBadge()),
+                  const SizedBox(height: 16),
+                  const SectionTitle(
+                    title: 'Логін в додаток',
+                  ),
+                  const SizedBox(height: 16),
+                  GoldPanel(
+                    child: Form(
+                      key: _formKey,
+                      child: Column(
+                        children: [
+                          GoldTextField(
+                            label: 'Пошта',
+                            hint: 'operator@vault.io',
+                            prefixIcon: Icons.alternate_email,
+                            keyboardType: TextInputType.emailAddress,
+                            controller: _emailController,
+                            validator: _validateEmail,
+                          ),
+                          const SizedBox(height: 12),
+                          GoldTextField(
+                            label: 'Пароль',
+                            hint: 'Мінімум 8 символів',
+                            prefixIcon: Icons.lock_outline,
+                            obscureText: true,
+                            controller: _passwordController,
+                            validator: _validatePassword,
+                          ),
+                          const SizedBox(height: 16),
+                          FilledButton.icon(
+                            onPressed: isLoading ? null : _handleLogin,
+                            icon: isLoading
+                                ? const SizedBox(
+                                    width: 16,
+                                    height: 16,
+                                    child: CircularProgressIndicator(
+                                      strokeWidth: 2,
+                                    ),
+                                  )
+                                : const Icon(Icons.login),
+                            label: Text(
+                              isLoading ? 'Перевірка...' : 'Увійти',
+                            ),
+                          ),
+                        ],
+                      ),
                     ),
-                    const SizedBox(height: 12),
-                    GoldTextField(
-                      label: 'Пароль',
-                      hint: 'Мінімум 8 символів',
-                      prefixIcon: Icons.lock_outline,
-                      obscureText: true,
-                      controller: _passwordController,
-                      validator: _authService.validatePassword,
+                  ),
+                  const SizedBox(height: 16),
+                  Center(
+                    child: TextButton(
+                      onPressed: () {
+                        Navigator.pushNamed(context, '/register');
+                      },
+                      child: const Text('Реєстрація'),
                     ),
-                    const SizedBox(height: 16),
-                    FilledButton.icon(
-                      onPressed: _isLoading ? null : _handleLogin,
-                      icon: _isLoading
-                          ? const SizedBox(
-                              width: 16,
-                              height: 16,
-                              child: CircularProgressIndicator(strokeWidth: 2),
-                            )
-                          : const Icon(Icons.login),
-                      label: Text(_isLoading ? 'Перевірка...' : 'Увійти'),
-                    ),
-                  ],
-                ),
+                  ),
+                ],
               ),
             ),
-            const SizedBox(height: 16),
-            Center(
-              child: TextButton(
-                onPressed: () {
-                  Navigator.pushNamed(context, '/register');
-                },
-                child: const Text('Реєстрація'),
-              ),
-            ),
-          ],
-        ),
+          );
+        },
       ),
     );
   }
