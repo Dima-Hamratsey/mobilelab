@@ -1,14 +1,13 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
-
 import 'package:mobileapp/models/station.dart';
 import 'package:mobileapp/network/network_status_service.dart';
 import 'package:mobileapp/repositories/api_auth_repository.dart';
 import 'package:mobileapp/repositories/api_station_repository.dart';
+import 'package:mobileapp/screens/home_content.dart';
 import 'package:mobileapp/services/auth_service.dart';
 import 'package:mobileapp/services/station_service.dart';
-import 'package:mobileapp/screens/home_content.dart';
 import 'package:mobileapp/widgets/gold_scaffold.dart';
 import 'package:mobileapp/widgets/station_editor_dialog.dart';
 
