@@ -1,7 +1,6 @@
 import 'package:flutter/material.dart';
-
-import 'package:mobileapp/repositories/api_auth_repository.dart';
 import 'package:mobileapp/api/api_client.dart';
+import 'package:mobileapp/repositories/api_auth_repository.dart';
 import 'package:mobileapp/services/auth_service.dart';
 import 'package:mobileapp/widgets/coin_badge.dart';
 import 'package:mobileapp/widgets/gold_panel.dart';
