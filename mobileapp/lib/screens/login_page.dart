@@ -1,7 +1,9 @@
+import 'package:flashlight_plugin/flashlight_plugin.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 
 import 'package:mobileapp/cubits/login_cubit.dart';
+import 'package:mobileapp/models/user.dart';
 import 'package:mobileapp/network/network_status_service.dart';
 import 'package:mobileapp/services/auth_service.dart';
 import 'package:mobileapp/widgets/coin_badge.dart';
@@ -39,7 +41,14 @@ class _LoginPageState extends State<LoginPage> {
   Future<void> _tryAutoLogin() async {
     final authService = context.read<AuthService>();
     final networkStatus = context.read<NetworkStatusService>();
-    final sessionUser = await authService.getSessionUser();
+    User? sessionUser;
+    try {
+      sessionUser = await authService
+          .getSessionUser()
+          .timeout(const Duration(seconds: 2));
+    } catch (_) {
+      sessionUser = null;
+    }
     if (!mounted) {
       return;
     }
@@ -51,10 +60,21 @@ class _LoginPageState extends State<LoginPage> {
       return;
     }
 
-    final isOnline = await networkStatus.isOnline();
+    var isOnline = false;
+    try {
+      isOnline = await networkStatus
+          .isOnline()
+          .timeout(const Duration(seconds: 2), onTimeout: () => false);
+    } catch (_) {
+      isOnline = false;
+    }
     if (!mounted) {
       return;
     }
+
+    setState(() {
+      _isCheckingSession = false;
+    });
 
     Navigator.pushReplacementNamed(
       context,
@@ -71,6 +91,12 @@ class _LoginPageState extends State<LoginPage> {
       email: _emailController.text,
       password: _passwordController.text,
     );
+  }
+
+  Future<void> toggleFlashlight() async {
+    try {
+      await FlashlightPlugin.onLight();
+    } catch (_) {}
   }
 
   String? _validateEmail(String? value) {
@@ -130,6 +156,12 @@ class _LoginPageState extends State<LoginPage> {
 
           return GoldScaffold(
             title: 'Вхід',
+            actions: [
+              IconButton(
+                onPressed: toggleFlashlight,
+                icon: const Icon(Icons.flash_on),
+              ),
+            ],
             child: SingleChildScrollView(
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
