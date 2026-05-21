@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 
 import 'package:mobileapp/network/network_status_service.dart';
-import 'package:mobileapp/repositories/local_auth_repository.dart';
+import 'package:mobileapp/repositories/api_auth_repository.dart';
 import 'package:mobileapp/services/auth_service.dart';
 import 'package:mobileapp/widgets/coin_badge.dart';
 import 'package:mobileapp/widgets/gold_panel.dart';
@@ -21,7 +21,7 @@ class _LoginPageState extends State<LoginPage> {
   final _emailController = TextEditingController();
   final _passwordController = TextEditingController();
   final AuthService _authService = AuthService(
-    repository: LocalAuthRepository(),
+    repository: ApiAuthRepository(),
   );
   final NetworkStatusService _networkStatus = NetworkStatusService();
 

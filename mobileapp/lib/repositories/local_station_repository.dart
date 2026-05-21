@@ -14,6 +14,17 @@ class LocalStationRepository extends IStationRepository {
   final Future<SharedPreferences> _preferences;
 
   static const String _stationsKey = 'stations';
+  static const String _pendingSyncKey = 'stations_pending_sync';
+
+  Future<bool> hasPendingSync() async {
+    final prefs = await _preferences;
+    return prefs.getBool(_pendingSyncKey) ?? false;
+  }
+
+  Future<void> setPendingSync(bool value) async {
+    final prefs = await _preferences;
+    await prefs.setBool(_pendingSyncKey, value);
+  }
 
   @override
   Future<StationList> fetchStations() async {
@@ -58,5 +69,10 @@ class LocalStationRepository extends IStationRepository {
     final stations = await fetchStations();
     final updated = stations.items.where((item) => item.id != id).toList();
     await saveStations(StationList(items: updated));
+  }
+
+  @override
+  Future<void> syncStations() async {
+    return;
   }
 }
